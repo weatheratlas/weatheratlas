@@ -1,0 +1,1413 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>WeatherAtlas — Live Atmospheric Intelligence</title>
+
+  <!-- Leaflet Map -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
+  <!-- Google Fonts: Distinctive Pairing -->
+  <link href="https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=Syne:wght@400;600;800&display=swap" rel="stylesheet"/>
+
+  <style>
+    /* ─── Design Tokens ─────────────────────────────────────────── */
+    :root {
+      --bg:        #080c14;
+      --surface:   rgba(12, 18, 30, 0.85);
+      --glass:     rgba(255,255,255,0.04);
+      --border:    rgba(255,255,255,0.08);
+      --accent:    #38bdf8;
+      --accent2:   #818cf8;
+      --warm:      #fb923c;
+      --green:     #34d399;
+      --red:       #f87171;
+      --text:      #e2e8f0;
+      --muted:     #64748b;
+      --glow:      0 0 24px rgba(56,189,248,0.18);
+    }
+
+    /* ─── Reset & Base ──────────────────────────────────────────── */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    html, body {
+      height: 100%;
+      background: var(--bg);
+      color: var(--text);
+      font-family: 'Syne', sans-serif;
+      overflow: hidden;
+    }
+
+    /* ─── Layout ────────────────────────────────────────────────── */
+    #app {
+      display: grid;
+      grid-template-columns: 340px 1fr;
+      grid-template-rows: 56px 1fr;
+      height: 100vh;
+      gap: 0;
+    }
+
+    /* ─── Top Bar ───────────────────────────────────────────────── */
+    #topbar {
+      grid-column: 1 / -1;
+      display: flex;
+      align-items: center;
+      gap: 20px;
+      padding: 0 20px;
+      background: rgba(8,12,20,0.95);
+      border-bottom: 1px solid var(--border);
+      backdrop-filter: blur(20px);
+      z-index: 1000;
+    }
+
+    .logo {
+      font-family: 'Syne', sans-serif;
+      font-weight: 800;
+      font-size: 16px;
+      letter-spacing: 0.08em;
+      color: var(--accent);
+      white-space: nowrap;
+      text-transform: uppercase;
+    }
+    .logo span { color: var(--muted); font-weight: 400; }
+
+    /* Search */
+    #search-wrap {
+      flex: 1;
+      max-width: 480px;
+      position: relative;
+    }
+    #city-input {
+      width: 100%;
+      padding: 8px 14px 8px 38px;
+      background: var(--glass);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      color: var(--text);
+      font-family: 'Space Mono', monospace;
+      font-size: 13px;
+      outline: none;
+      transition: border-color .2s, box-shadow .2s;
+    }
+    #city-input::placeholder { color: var(--muted); }
+    #city-input:focus {
+      border-color: var(--accent);
+      box-shadow: var(--glow);
+    }
+    .search-icon {
+      position: absolute;
+      left: 12px; top: 50%; transform: translateY(-50%);
+      color: var(--muted); font-size: 14px; pointer-events: none;
+    }
+
+    /* Suggestions dropdown */
+    #suggestions {
+      position: absolute;
+      top: calc(100% + 6px);
+      left: 0; right: 0;
+      background: rgba(10,16,28,0.98);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      overflow: hidden;
+      z-index: 9999;
+      display: none;
+    }
+    .suggestion-item {
+      padding: 10px 14px;
+      font-size: 13px;
+      font-family: 'Space Mono', monospace;
+      cursor: pointer;
+      border-bottom: 1px solid var(--border);
+      transition: background .15s;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .suggestion-item:last-child { border-bottom: none; }
+    .suggestion-item:hover { background: rgba(56,189,248,0.08); color: var(--accent); }
+    .suggestion-icon { color: var(--muted); font-size: 11px; }
+
+    /* Layer pills */
+    #layer-pills {
+      display: flex;
+      gap: 6px;
+      margin-left: auto;
+    }
+    .pill {
+      padding: 5px 12px;
+      border-radius: 20px;
+      font-size: 11px;
+      font-family: 'Space Mono', monospace;
+      font-weight: 700;
+      letter-spacing: 0.05em;
+      cursor: pointer;
+      border: 1px solid var(--border);
+      background: transparent;
+      color: var(--muted);
+      transition: all .2s;
+      text-transform: uppercase;
+    }
+    .pill:hover { color: var(--text); border-color: rgba(255,255,255,0.2); }
+    .pill.active { background: var(--accent); color: #000; border-color: var(--accent); }
+    .pill[data-layer="wind"].active   { background: var(--accent); }
+    .pill[data-layer="temp"].active   { background: var(--warm); }
+    .pill[data-layer="clouds"].active { background: #94a3b8; color: #000; }
+    .pill[data-layer="rain"].active   { background: var(--accent2); }
+
+    /* ─── Sidebar ───────────────────────────────────────────────── */
+    #sidebar {
+      background: var(--surface);
+      border-right: 1px solid var(--border);
+      backdrop-filter: blur(24px);
+      overflow-y: auto;
+      padding: 20px;
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+      z-index: 100;
+    }
+    #sidebar::-webkit-scrollbar { width: 4px; }
+    #sidebar::-webkit-scrollbar-track { background: transparent; }
+    #sidebar::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+
+    /* City header */
+    #city-header {
+      padding-bottom: 16px;
+      border-bottom: 1px solid var(--border);
+    }
+    #city-name {
+      font-size: 24px;
+      font-weight: 800;
+      line-height: 1.2;
+      color: var(--text);
+      text-transform: uppercase;
+    }
+    #city-meta {
+      font-family: 'Space Mono', monospace;
+      font-size: 11px;
+      color: var(--muted);
+      margin-top: 4px;
+    }
+    #current-time {
+      font-family: 'Space Mono', monospace;
+      font-size: 10px;
+      color: var(--accent);
+      margin-top: 6px;
+      letter-spacing: 0.08em;
+    }
+
+    /* Main temp display */
+    #temp-display {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 16px;
+      min-height: 100px;
+    }
+    #temp-display::before {
+      content: '';
+      position: absolute;
+      top: -20px; right: -20px;
+      width: 100px; height: 100px;
+      background: radial-gradient(circle, rgba(56,189,248,0.12) 0%, transparent 70%);
+      pointer-events: none;
+    }
+    #main-temp {
+      font-size: 54px;
+      font-weight: 800;
+      line-height: 1;
+      color: var(--text);
+    }
+    #temp-unit { font-size: 20px; color: var(--muted); margin-bottom: 8px; }
+    #weather-desc-wrap { margin-left: auto; text-align: right; }
+    #weather-icon { font-size: 36px; display: block; }
+    #weather-desc {
+      font-size: 12px;
+      font-family: 'Space Mono', monospace;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+    }
+
+    /* Stats grid */
+    .stats-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px;
+    }
+    .stat-card {
+      background: var(--glass);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 12px;
+      transition: border-color .2s;
+    }
+    .stat-card:hover { border-color: rgba(255,255,255,0.16); }
+    .stat-label {
+      font-family: 'Space Mono', monospace;
+      font-size: 9px;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 0.1em;
+      margin-bottom: 6px;
+    }
+    .stat-value {
+      font-size: 18px;
+      font-weight: 800;
+      color: var(--text);
+      line-height: 1;
+    }
+    .stat-value.accent  { color: var(--accent); }
+    .stat-value.warm    { color: var(--warm); }
+    .stat-value.green   { color: var(--green); }
+    .stat-value.purple  { color: var(--accent2); }
+    .stat-unit {
+      font-family: 'Space Mono', monospace;
+      font-size: 10px;
+      color: var(--muted);
+      margin-top: 2px;
+    }
+
+    /* Section titles */
+    .section-title {
+      font-size: 10px;
+      font-family: 'Space Mono', monospace;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 0.12em;
+      margin-bottom: 8px;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .section-title::after {
+      content: '';
+      flex: 1;
+      height: 1px;
+      background: var(--border);
+    }
+
+    /* Forecast row */
+    #forecast-row {
+      display: flex;
+      gap: 6px;
+    }
+    .forecast-item {
+      flex: 1;
+      background: var(--glass);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 10px 6px;
+      text-align: center;
+      transition: border-color .2s, background .2s;
+      cursor: default;
+    }
+    .forecast-item:hover {
+      border-color: rgba(56,189,248,0.3);
+      background: rgba(56,189,248,0.04);
+    }
+    .fc-day {
+      font-family: 'Space Mono', monospace;
+      font-size: 9px;
+      color: var(--muted);
+      text-transform: uppercase;
+      margin-bottom: 6px;
+    }
+    .fc-icon { font-size: 18px; margin-bottom: 4px; }
+    .fc-hi {
+      font-size: 13px;
+      font-weight: 800;
+      color: var(--text);
+    }
+    .fc-lo {
+      font-size: 11px;
+      color: var(--muted);
+    }
+
+    /* Wind compass */
+    .compass-wrap {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 12px;
+      background: var(--glass);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+    }
+    #compass {
+      width: 56px; height: 56px;
+      flex-shrink: 0;
+      position: relative;
+    }
+    #compass svg { width: 100%; height: 100%; }
+    #compass-needle {
+      transform-origin: center;
+      transition: transform 1s cubic-bezier(.34,1.56,.64,1);
+    }
+    .compass-info { flex: 1; }
+    .compass-speed {
+      font-size: 22px;
+      font-weight: 800;
+      color: var(--accent);
+    }
+    .compass-label {
+      font-family: 'Space Mono', monospace;
+      font-size: 10px;
+      color: var(--muted);
+      text-transform: uppercase;
+    }
+
+    /* AQI bar */
+    .aqi-bar-wrap {
+      padding: 12px;
+      background: var(--glass);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+    }
+    .aqi-label-row {
+      display: flex;
+      justify-content: space-between;
+      margin-bottom: 8px;
+    }
+    .aqi-index {
+      font-size: 18px;
+      font-weight: 800;
+    }
+    .aqi-bar {
+      width: 100%;
+      height: 6px;
+      background: rgba(255,255,255,0.06);
+      border-radius: 3px;
+      overflow: hidden;
+    }
+    .aqi-fill {
+      height: 100%;
+      border-radius: 3px;
+      transition: width 1s ease;
+    }
+    .aqi-status {
+      font-family: 'Space Mono', monospace;
+      font-size: 9px;
+      color: var(--muted);
+      margin-top: 4px;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+    }
+
+    /* Nearby places */
+    #places-list { display: flex; flex-direction: column; gap: 6px; }
+    .place-item {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 10px 12px;
+      background: var(--glass);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      cursor: pointer;
+      transition: all .2s;
+    }
+    .place-item:hover {
+      border-color: rgba(56,189,248,0.3);
+      background: rgba(56,189,248,0.06);
+      transform: translateX(2px);
+    }
+    .place-dot {
+      width: 8px; height: 8px;
+      border-radius: 50%;
+      flex-shrink: 0;
+    }
+    .place-name {
+      font-size: 13px;
+      font-weight: 600;
+      flex: 1;
+    }
+    .place-type {
+      font-family: 'Space Mono', monospace;
+      font-size: 9px;
+      color: var(--muted);
+      text-transform: uppercase;
+    }
+    .place-temp {
+      font-family: 'Space Mono', monospace;
+      font-size: 12px;
+      color: var(--accent);
+    }
+
+    /* ─── Map ───────────────────────────────────────────────────── */
+    #map-container {
+      position: relative;
+      overflow: hidden;
+    }
+    #map {
+      width: 100%;
+      height: 100%;
+    }
+
+    /* Leaflet dark tile custom override */
+    .leaflet-tile-pane { filter: brightness(0.85) saturate(0.7) hue-rotate(190deg); }
+
+    /* Map overlay info */
+    #map-overlay {
+      position: absolute;
+      bottom: 24px;
+      right: 24px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      z-index: 500;
+    }
+    .map-stat-bubble {
+      background: rgba(8,12,20,0.88);
+      border: 1px solid var(--border);
+      backdrop-filter: blur(16px);
+      border-radius: 10px;
+      padding: 10px 14px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-family: 'Space Mono', monospace;
+      font-size: 12px;
+    }
+    .bubble-dot { width: 8px; height: 8px; border-radius: 50%; }
+    .bubble-val { font-weight: 700; color: var(--text); }
+    .bubble-key { color: var(--muted); font-size: 10px; }
+
+    /* Legend */
+    #layer-legend {
+      position: absolute;
+      bottom: 24px;
+      left: 24px;
+      background: rgba(8,12,20,0.88);
+      border: 1px solid var(--border);
+      backdrop-filter: blur(16px);
+      border-radius: 10px;
+      padding: 12px 14px;
+      z-index: 500;
+      display: none;
+    }
+    #layer-legend.visible { display: block; }
+    .legend-title {
+      font-family: 'Space Mono', monospace;
+      font-size: 9px;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 0.1em;
+      margin-bottom: 8px;
+    }
+    .legend-gradient {
+      width: 160px;
+      height: 8px;
+      border-radius: 4px;
+      margin-bottom: 4px;
+    }
+    .legend-labels {
+      display: flex;
+      justify-content: space-between;
+      font-family: 'Space Mono', monospace;
+      font-size: 9px;
+      color: var(--muted);
+    }
+
+    /* Loading state */
+    #loader {
+      position: fixed;
+      inset: 0;
+      background: var(--bg);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      z-index: 9999;
+      gap: 16px;
+      transition: opacity .5s;
+    }
+    #loader.hidden { opacity: 0; pointer-events: none; }
+    .loader-logo {
+      font-family: 'Syne', sans-serif;
+      font-size: 28px;
+      font-weight: 800;
+      color: var(--accent);
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+    }
+    .loader-bar {
+      width: 200px; height: 2px;
+      background: var(--border);
+      border-radius: 1px;
+      overflow: hidden;
+    }
+    .loader-fill {
+      height: 100%;
+      background: var(--accent);
+      border-radius: 1px;
+      animation: load 1.2s ease forwards;
+    }
+    @keyframes load {
+      from { width: 0; }
+      to   { width: 100%; }
+    }
+    .loader-text {
+      font-family: 'Space Mono', monospace;
+      font-size: 10px;
+      color: var(--muted);
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+    }
+
+    /* Notification toast */
+    #toast {
+      position: fixed;
+      top: 70px; right: 20px;
+      background: rgba(8,12,20,0.95);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 10px 16px;
+      font-family: 'Space Mono', monospace;
+      font-size: 12px;
+      color: var(--text);
+      z-index: 9998;
+      transform: translateX(120%);
+      transition: transform .3s cubic-bezier(.34,1.56,.64,1);
+    }
+    #toast.show { transform: translateX(0); }
+    #toast.error { border-color: var(--red); color: var(--red); }
+    #toast.success { border-color: var(--green); color: var(--green); }
+
+    /* Skeleton shimmer */
+    .skeleton {
+      background: linear-gradient(90deg, var(--glass) 25%, rgba(255,255,255,0.06) 50%, var(--glass) 75%);
+      background-size: 200% 100%;
+      animation: shimmer 1.5s infinite;
+      border-radius: 4px;
+    }
+    @keyframes shimmer {
+      0%   { background-position: 200% 0; }
+      100% { background-position: -200% 0; }
+    }
+
+    /* Tooltip on map marker */
+    .leaflet-tooltip {
+      background: rgba(8,12,20,0.92) !important;
+      border: 1px solid var(--border) !important;
+      color: var(--text) !important;
+      font-family: 'Space Mono', monospace !important;
+      font-size: 11px !important;
+      border-radius: 6px !important;
+      padding: 5px 9px !important;
+      box-shadow: none !important;
+    }
+    .leaflet-tooltip::before { display: none !important; }
+
+    /* Pulse marker animation */
+    @keyframes pulse-ring {
+      0%   { transform: scale(1); opacity: 1; }
+      100% { transform: scale(2.2); opacity: 0; }
+    }
+
+    /* Scrollbar */
+    ::-webkit-scrollbar { width: 4px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+
+    /* Responsive hint */
+    @media (max-width: 768px) {
+      #app { grid-template-columns: 1fr; grid-template-rows: 56px 300px 1fr; }
+      #sidebar { overflow-y: visible; }
+    }
+  </style>
+</head>
+<body>
+
+<!-- Loader -->
+<div id="loader">
+  <div class="loader-logo">WeatherAtlas</div>
+  <div class="loader-bar"><div class="loader-fill"></div></div>
+  <div class="loader-text">Initializing atmospheric sensors...</div>
+</div>
+
+<!-- Toast -->
+<div id="toast"></div>
+
+<!-- Main App -->
+<div id="app">
+
+  <!-- Top Bar -->
+  <header id="topbar">
+    <div class="logo">Weather<span>Atlas</span></div>
+
+    <div id="search-wrap">
+      <span class="search-icon">⌕</span>
+      <input id="city-input" type="text" placeholder="Search city, region, or coordinates…" autocomplete="off"/>
+      <div id="suggestions"></div>
+    </div>
+
+    <div id="layer-pills">
+      <button class="pill active" data-layer="wind">Wind</button>
+      <button class="pill" data-layer="temp">Temp</button>
+      <button class="pill" data-layer="clouds">Cloud</button>
+      <button class="pill" data-layer="rain">Rain</button>
+      <button class="pill" data-layer="none">Base</button>
+    </div>
+  </header>
+
+  <!-- Sidebar -->
+  <aside id="sidebar">
+
+    <!-- City Header -->
+    <div id="city-header">
+      <div id="city-name">Mumbai, IN</div>
+      <div id="city-meta">18.9°N · 72.8°E · GMT+5:30</div>
+      <div id="current-time">⏱ Loading time…</div>
+    </div>
+
+    <!-- Main Temp -->
+    <div id="temp-display">
+      <div>
+        <div id="main-temp">--</div>
+      </div>
+      <div id="temp-unit">°C</div>
+      <div id="weather-desc-wrap">
+        <span id="weather-icon">⛅</span>
+        <span id="weather-desc">Loading…</span>
+      </div>
+    </div>
+
+    <!-- Stats Grid -->
+    <div>
+      <div class="section-title">Atmospheric Data</div>
+      <div class="stats-grid">
+        <div class="stat-card">
+          <div class="stat-label">Humidity</div>
+          <div class="stat-value accent" id="stat-humidity">--</div>
+          <div class="stat-unit">percent %</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">Feels Like</div>
+          <div class="stat-value warm" id="stat-feels">--</div>
+          <div class="stat-unit">degrees °C</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">Pressure</div>
+          <div class="stat-value green" id="stat-pressure">--</div>
+          <div class="stat-unit">hPa</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">Visibility</div>
+          <div class="stat-value purple" id="stat-vis">--</div>
+          <div class="stat-unit">kilometres</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">Sunrise</div>
+          <div class="stat-value" id="stat-sunrise" style="font-size:14px">--</div>
+          <div class="stat-unit">local time</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">Sunset</div>
+          <div class="stat-value" id="stat-sunset" style="font-size:14px">--</div>
+          <div class="stat-unit">local time</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Wind Compass -->
+    <div>
+      <div class="section-title">Wind</div>
+      <div class="compass-wrap">
+        <div id="compass">
+          <svg viewBox="0 0 56 56">
+            <!-- Compass ring -->
+            <circle cx="28" cy="28" r="26" fill="none" stroke="rgba(255,255,255,0.06)" stroke-width="1.5"/>
+            <circle cx="28" cy="28" r="20" fill="none" stroke="rgba(255,255,255,0.04)" stroke-width="1"/>
+            <!-- Cardinal directions -->
+            <text x="28" y="8"  text-anchor="middle" fill="#64748b" font-size="6" font-family="Space Mono,monospace">N</text>
+            <text x="28" y="53" text-anchor="middle" fill="#64748b" font-size="6" font-family="Space Mono,monospace">S</text>
+            <text x="6"  y="31" text-anchor="middle" fill="#64748b" font-size="6" font-family="Space Mono,monospace">W</text>
+            <text x="50" y="31" text-anchor="middle" fill="#64748b" font-size="6" font-family="Space Mono,monospace">E</text>
+            <!-- Needle -->
+            <g id="compass-needle">
+              <polygon points="28,10 31,28 28,32 25,28" fill="#38bdf8"/>
+              <polygon points="28,46 31,28 28,32 25,28" fill="rgba(255,255,255,0.15)"/>
+              <circle cx="28" cy="28" r="3" fill="#0f172a" stroke="#38bdf8" stroke-width="1.5"/>
+            </g>
+          </svg>
+        </div>
+        <div class="compass-info">
+          <div class="compass-speed" id="wind-speed">-- <span style="font-size:12px;color:var(--muted)">m/s</span></div>
+          <div class="compass-label" id="wind-dir">Direction: —</div>
+          <div class="compass-label" id="wind-gust" style="margin-top:2px">Gust: — m/s</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- AQI -->
+    <div>
+      <div class="section-title">Air Quality</div>
+      <div class="aqi-bar-wrap">
+        <div class="aqi-label-row">
+          <span class="stat-label">AQI Index</span>
+          <span class="aqi-index" id="aqi-val" style="color:var(--green)">--</span>
+        </div>
+        <div class="aqi-bar">
+          <div class="aqi-fill" id="aqi-fill" style="width:0%;background:var(--green)"></div>
+        </div>
+        <div class="aqi-status" id="aqi-status">Loading air quality data…</div>
+      </div>
+    </div>
+
+    <!-- 5-day Forecast -->
+    <div>
+      <div class="section-title">5-Day Forecast</div>
+      <div id="forecast-row">
+        <div class="forecast-item skeleton" style="height:80px"></div>
+        <div class="forecast-item skeleton" style="height:80px"></div>
+        <div class="forecast-item skeleton" style="height:80px"></div>
+        <div class="forecast-item skeleton" style="height:80px"></div>
+        <div class="forecast-item skeleton" style="height:80px"></div>
+      </div>
+    </div>
+
+    <!-- Nearby Places -->
+    <div>
+      <div class="section-title">Nearby Locations</div>
+      <div id="places-list">
+        <div class="place-item skeleton" style="height:40px"></div>
+        <div class="place-item skeleton" style="height:40px"></div>
+        <div class="place-item skeleton" style="height:40px"></div>
+      </div>
+    </div>
+
+  </aside>
+
+  <!-- Map -->
+  <div id="map-container">
+    <div id="map"></div>
+
+    <!-- Map Overlay Bubbles -->
+    <div id="map-overlay">
+      <div class="map-stat-bubble">
+        <div class="bubble-dot" style="background:var(--accent)"></div>
+        <span class="bubble-key">WIND</span>
+        <span class="bubble-val" id="ov-wind">-- m/s</span>
+      </div>
+      <div class="map-stat-bubble">
+        <div class="bubble-dot" style="background:var(--warm)"></div>
+        <span class="bubble-key">TEMP</span>
+        <span class="bubble-val" id="ov-temp">-- °C</span>
+      </div>
+      <div class="map-stat-bubble">
+        <div class="bubble-dot" style="background:var(--accent2)"></div>
+        <span class="bubble-key">CLOUDS</span>
+        <span class="bubble-val" id="ov-clouds">-- %</span>
+      </div>
+    </div>
+
+    <!-- Layer Legend -->
+    <div id="layer-legend">
+      <div class="legend-title" id="legend-title">Wind Speed (m/s)</div>
+      <div class="legend-gradient" id="legend-gradient"
+           style="background: linear-gradient(to right, #38bdf8, #818cf8, #f87171)"></div>
+      <div class="legend-labels">
+        <span id="legend-min">0</span>
+        <span id="legend-max">30+</span>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<script>
+// ═══════════════════════════════════════════════════════════════
+//  WeatherAtlas — Main Application Script
+//  GUIDE: This is structured in sections. Read each comment!
+// ═══════════════════════════════════════════════════════════════
+
+// ─── 1. CONFIGURATION ────────────────────────────────────────────
+// 🔑 API KEY SETUP:
+//    1. Go to https://openweathermap.org/api → Sign up (free)
+//    2. Generate an API key → paste it below
+//    3. Free tier gives: current weather, 5-day forecast, air quality
+//    Note: Key can take ~2 hours to activate after signup
+
+const OWM_KEY = '773faa83a0917071d116810008763779'; // ← REPLACE THIS!
+
+// OWM tile layer URLs (for map overlays — these are free with an API key)
+const OWM_TILE = (layer) =>
+  `https://tile.openweathermap.org/map/${layer}/{z}/{x}/{y}.png?appid=${OWM_KEY}`;
+
+// ─── 2. STATE ─────────────────────────────────────────────────────
+// This object holds all app state. Good pattern for beginners!
+const state = {
+  map: null,
+  currentCity: { name: 'Mumbai', lat: 19.076, lon: 72.877, country: 'IN' },
+  activeLayer: 'wind',
+  overlayLayer: null,
+  cityMarker: null,
+  nearbyMarkers: [],
+  weatherData: null,
+};
+
+// ─── 3. MAP INIT ──────────────────────────────────────────────────
+// Leaflet.js is an open-source JS library for interactive maps.
+// We use CartoDB dark tiles for the sleek base layer.
+function initMap() {
+  state.map = L.map('map', {
+    center: [state.currentCity.lat, state.currentCity.lon],
+    zoom: 10,
+    zoomControl: false,          // We'll add custom positioned controls
+    attributionControl: true,
+  });
+
+  // Dark base tile layer from CartoDB
+  // GUIDE: Tile layers are image squares (256x256 px) that make up the map.
+  // {z} = zoom level, {x}{y} = grid coordinates
+  L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+    attribution: '© CartoDB · OpenWeatherMap',
+    subdomains: 'abcd',
+    maxZoom: 19
+  }).addTo(state.map);
+
+  // Custom zoom controls positioned top-right
+  L.control.zoom({ position: 'topright' }).addTo(state.map);
+
+  // Apply the default wind layer
+  applyWeatherLayer('wind');
+}
+
+// ─── 4. WEATHER LAYERS ────────────────────────────────────────────
+// OWM provides map tile overlays for: wind_new, temp_new, clouds_new,
+// precipitation_new, pressure_new
+// GUIDE: These are semi-transparent image tiles drawn ON TOP of the base map.
+function getTempColor(temp) {
+  if (temp <= 15) return '#38bdf8'; // Blue
+  if (temp <= 25) return '#34d399'; // Green
+  if (temp <= 32) return '#fb923c'; // Orange
+  return '#f87171';                // Red
+}
+
+
+const layerConfig = {
+  wind:   { owm: 'wind_new',          legend: 'Wind Speed (m/s)',      grad: 'linear-gradient(to right,#0ea5e9,#38bdf8,#818cf8,#f87171)', min:'0', max:'30+' },
+  temp:   { owm: 'temp_new',          legend: 'Temperature (°C)',      grad: 'linear-gradient(to right,#38bdf8,#34d399,#fbbf24,#ef4444)', min:'-30', max:'45+' },
+  clouds: { owm: 'clouds_new',        legend: 'Cloud Cover (%)',       grad: 'linear-gradient(to right,rgba(255,255,255,0.05),#94a3b8,#e2e8f0)', min:'0', max:'100' },
+  rain:   { owm: 'precipitation_new', legend: 'Precipitation (mm/h)',  grad: 'linear-gradient(to right,rgba(130,180,255,0.1),#818cf8,#4f46e5)', min:'0', max:'50+' },
+  none:   { owm: null,                legend: null,                     grad: null, min:'', max:'' },
+};
+
+function applyWeatherLayer(layerKey) {
+  // Remove previous overlay
+  if (state.overlayLayer) {
+    state.map.removeLayer(state.overlayLayer);
+    state.overlayLayer = null;
+  }
+
+  const cfg = layerConfig[layerKey];
+  const legend = document.getElementById('layer-legend');
+
+  if (cfg.owm && OWM_KEY !== '773faa83a0917071d116810008763779') {
+    // GUIDE: L.tileLayer adds a new tile layer to the map
+    // opacity: 0.7 keeps the base map visible underneath
+    state.overlayLayer = L.tileLayer(OWM_TILE(cfg.owm), {
+      opacity: 0.72,
+      zIndex: 1000,
+      maxZoom: 19
+    }).addTo(state.map);
+  }
+
+  // Update legend
+  if (cfg.legend) {
+    legend.classList.add('visible');
+    document.getElementById('legend-title').textContent = cfg.legend;
+    document.getElementById('legend-gradient').style.background = cfg.grad;
+    document.getElementById('legend-min').textContent = cfg.min;
+    document.getElementById('legend-max').textContent = cfg.max;
+  } else {
+    legend.classList.remove('visible');
+  }
+}
+
+// ─── 5. WEATHER DATA FETCH ────────────────────────────────────────
+// GUIDE: fetch() is the modern JS way to make HTTP requests.
+// We use async/await — cleaner than old callback style.
+// If OWM_KEY is not set, we use realistic demo data so UI still works.
+
+async function fetchWeather(lat, lon) {
+  try {
+    // Calling your Flask API
+    const response = await fetch(`/api/weather?lat=${lat}&lon=${lon}`);
+    if (!response.ok) throw new Error('Flask server error');
+    return await response.json();
+  } catch (err) {
+    console.error("Fetch error:", err);
+    // Fallback to demo data so the app actually loads
+    return getDemoWeather(lat, lon); 
+  }
+  try {
+    // Parallel requests — faster than sequential
+    // GUIDE: Promise.all runs multiple async operations at once
+    const [current, forecast, air] = await Promise.all([
+      fetch(`https://api.openweathermap.org/data/2.5/weather?lat=${lat}&lon=${lon}&appid=${OWM_KEY}&units=metric`).then(r => r.json()),
+      fetch(`https://api.openweathermap.org/data/2.5/forecast?lat=${lat}&lon=${lon}&appid=${OWM_KEY}&units=metric`).then(r => r.json()),
+      fetch(`https://api.openweathermap.org/data/2.5/air_pollution?lat=${lat}&lon=${lon}&appid=${OWM_KEY}`).then(r => r.json()),
+    ]);
+
+    if (current.cod !== 200) throw new Error(current.message);
+    return { current, forecast, air };
+  } catch (err) {
+    showToast('API error: ' + err.message, 'error');
+    return getDemoWeather(lat, lon);
+  }
+}
+
+// Demo weather — realistic values so UI is fully testable without API key
+function getDemoWeather(lat, lon) {
+  const h = Math.round(Math.sin(lat) * 20 + 65);
+  const t = Math.round(Math.cos(lon * 0.1) * 8 + 28);
+  return {
+    current: {
+      cod: 200,
+      name: state.currentCity.name,
+      sys: { country: state.currentCity.country, sunrise: Date.now()/1000 - 21600, sunset: Date.now()/1000 + 21600 },
+      main: { temp: t, feels_like: t-2, humidity: h, pressure: 1011 },
+      wind: { speed: 4.2, deg: 220, gust: 6.1 },
+      visibility: 9500,
+      weather: [{ description: 'partly cloudy', icon: '02d', id: 802 }],
+      clouds: { all: 38 },
+    },
+    forecast: {
+      list: Array.from({length:5}, (_, i) => ({
+        dt: Date.now()/1000 + i*86400,
+        main: { temp_max: t+i-1, temp_min: t-i-3 },
+        weather: [{ id: 800+i*10 }]
+      }))
+    },
+    air: {
+      list: [{ main: { aqi: 2 }, components: { pm2_5: 12, no2: 8 } }]
+    },
+    _isDemo: true
+  };
+}
+
+// ─── 6. UPDATE UI ─────────────────────────────────────────────────
+// This function takes raw API data and fills in all the UI elements.
+// GUIDE: document.getElementById() grabs an HTML element by its id="..."
+
+function updateUI(data) {
+  const c = data.current; // This is the weather data from Flask
+  const air = data.air?.list?.[0];
+
+  // 1. DYNAMIC COLOR LOGIC (Moved here)
+  const currentTemp = Math.round(c.main.temp);
+  const tempElement = document.getElementById('main-temp');
+  const tempColor = getTempColor(currentTemp);
+  const mapBubble = document.getElementById('ov-temp');
+  if (mapBubble && mapBubble.parentElement) {
+    mapBubble.textContent = `${currentTemp}°C`;
+    mapBubble.parentElement.style.borderColor = tempColor;
+  }
+  if (tempElement) {
+    // This calls the helper function to get the color based on live temp
+    tempElement.style.color = getTempColor(currentTemp); 
+  }
+
+  // City header
+  document.getElementById('city-name').textContent = 
+    `${c.name}, ${c.sys?.country || state.currentCity.country}`;
+    
+  document.getElementById('main-temp').textContent = currentTemp;
+  document.getElementById('weather-icon').textContent = getWeatherEmoji(c.weather[0].id);
+  document.getElementById('weather-desc').textContent = c.weather[0].description.toUpperCase();
+
+  // Temperature
+  document.getElementById('main-temp').textContent = Math.round(c.main.temp);
+  document.getElementById('weather-icon').textContent = getWeatherEmoji(c.weather[0].id);
+  document.getElementById('weather-desc').textContent = c.weather[0].description.toUpperCase();
+
+  // Stats
+  document.getElementById('stat-humidity').textContent = c.main.humidity;
+  document.getElementById('stat-feels').textContent = Math.round(c.main.feels_like);
+  document.getElementById('stat-pressure').textContent = c.main.pressure;
+  document.getElementById('stat-vis').textContent = (c.visibility/1000).toFixed(1);
+  document.getElementById('stat-sunrise').textContent = formatTime(c.sys.sunrise);
+  document.getElementById('stat-sunset').textContent = formatTime(c.sys.sunset);
+
+  // Wind compass
+  document.getElementById('wind-speed').innerHTML =
+    `${c.wind.speed.toFixed(1)} <span style="font-size:12px;color:var(--muted)">m/s</span>`;
+  document.getElementById('wind-dir').textContent = `Direction: ${degToCardinal(c.wind.deg)}`;
+  document.getElementById('wind-gust').textContent = `Gust: ${(c.wind.gust || c.wind.speed * 1.3).toFixed(1)} m/s`;
+  // Rotate compass needle
+  document.getElementById('compass-needle').style.transform = `rotate(${c.wind.deg}deg)`;
+
+  // AQI
+  if (air) {
+    const aqiMap = { 1:['Good','var(--green)',20], 2:['Fair','#a3e635',40],
+                     3:['Moderate','var(--warm)',60], 4:['Poor','#f97316',80], 5:['Very Poor','var(--red)',100] };
+    const [label, color, pct] = aqiMap[air.main.aqi] || ['--','var(--muted)',0];
+    document.getElementById('aqi-val').textContent = air.main.aqi;
+    document.getElementById('aqi-val').style.color = color;
+    document.getElementById('aqi-fill').style.width = pct + '%';
+    document.getElementById('aqi-fill').style.background = color;
+    document.getElementById('aqi-status').textContent =
+      `${label} · PM2.5: ${air.components?.pm2_5?.toFixed(1) || '--'} μg/m³`;
+  }
+
+  // Map overlay bubbles
+  document.getElementById('ov-temp').textContent = `${currentTemp}°C`;
+  document.getElementById('ov-wind').textContent = `${c.wind.speed.toFixed(1)} m/s`;
+  document.getElementById('ov-clouds').textContent = `${c.clouds?.all || '--'}%`;
+
+  // 5-day forecast
+  updateForecast(data.forecast);
+
+  if (data._isDemo) showToast('Demo mode — add your API key to see live data', 'info');
+}
+
+function updateForecast(forecast) {
+  if (!forecast?.list) return;
+  const days = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+  const items = forecast.list.slice(0,5);
+  const row = document.getElementById('forecast-row');
+  row.innerHTML = items.map(item => {
+    const d = new Date(item.dt * 1000);
+    return `
+      <div class="forecast-item">
+        <div class="fc-day">${days[d.getDay()]}</div>
+        <div class="fc-icon">${getWeatherEmoji(item.weather[0].id)}</div>
+        <div class="fc-hi">${Math.round(item.main.temp_max)}°</div>
+        <div class="fc-lo">${Math.round(item.main.temp_min)}°</div>
+      </div>`;
+  }).join('');
+}
+
+// ─── 7. NEARBY PLACES ─────────────────────────────────────────────
+// We use OpenStreetMap Nominatim (free, no key needed!) to find
+// nearby cities within the same region.
+// GUIDE: encodeURIComponent() safely encodes special characters in URLs.
+
+async function fetchNearbyPlaces(lat, lon, cityName) {
+  const colors = ['#38bdf8','#34d399','#fb923c','#818cf8','#f472b6'];
+  const types  = ['City','Town','District','Metro','Region'];
+
+  try {
+    // Nominatim reverse-search gives us the region/state context
+    const res = await fetch(
+      `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(cityName)}&format=json&limit=8&addressdetails=1`,
+      { headers: { 'Accept-Language': 'en' } }
+    );
+    const data = await res.json();
+
+    // Filter out the main city itself, keep nearby
+    const places = data
+      .filter(p => p.display_name.toLowerCase() !== cityName.toLowerCase())
+      .slice(0, 5)
+      .map((p, i) => ({
+        name: p.name || p.display_name.split(',')[0],
+        type: types[i % types.length],
+        lat: parseFloat(p.lat),
+        lon: parseFloat(p.lon),
+        color: colors[i],
+      }));
+
+    renderNearbyPlaces(places);
+    addNearbyMarkers(places);
+  } catch (e) {
+    // Fallback with plausible nearby cities
+    renderNearbyPlaces(getDemoNearby(cityName, lat, lon));
+  }
+}
+
+function getDemoNearby(cityName, lat, lon) {
+  const presets = {
+    'mumbai': [{name:'Thane',lat:19.218,lon:72.978},{name:'Pune',lat:18.520,lon:73.857},
+               {name:'Navi Mumbai',lat:19.033,lon:73.029},{name:'Vasai',lat:19.475,lon:72.800}],
+    'delhi':  [{name:'Gurgaon',lat:28.459,lon:77.026},{name:'Noida',lat:28.535,lon:77.391},
+               {name:'Faridabad',lat:28.408,lon:77.317},{name:'Ghaziabad',lat:28.669,lon:77.453}],
+    'london': [{name:'Croydon',lat:51.376,lon:-0.098},{name:'Watford',lat:51.656,lon:-0.396},
+               {name:'Slough',lat:51.511,lon:-0.595},{name:'Kingston',lat:51.412,lon:-0.300}],
+  };
+  const key = cityName.toLowerCase();
+  const found = presets[key] || [
+    {name:'Nearby Town A',lat:lat+0.3,lon:lon+0.2},
+    {name:'Nearby Town B',lat:lat-0.2,lon:lon+0.4},
+    {name:'Nearby Region',lat:lat+0.1,lon:lon-0.3},
+    {name:'Outskirts',    lat:lat-0.4,lon:lon-0.1},
+  ];
+  const colors = ['#38bdf8','#34d399','#fb923c','#818cf8'];
+  return found.map((p,i) => ({ ...p, color: colors[i], type: ['City','Town','District','Region'][i] }));
+}
+
+function renderNearbyPlaces(places) {
+  const list = document.getElementById('places-list');
+  list.innerHTML = places.map(p => `
+    <div class="place-item" onclick="flyToPlace(${p.lat},${p.lon},'${p.name}')">
+      <div class="place-dot" style="background:${p.color}"></div>
+      <div class="place-name">${p.name}</div>
+      <div class="place-type">${p.type}</div>
+      <div class="place-temp">→</div>
+    </div>
+  `).join('');
+}
+
+function addNearbyMarkers(places) {
+  // Clear old markers
+  state.nearbyMarkers.forEach(m => state.map.removeLayer(m));
+  state.nearbyMarkers = [];
+
+  places.forEach(p => {
+    // Custom circle marker for nearby places
+    // GUIDE: L.circleMarker draws a circle at lat/lon coordinates
+    const m = L.circleMarker([p.lat, p.lon], {
+      radius: 7,
+      fillColor: p.color,
+      color: '#0f172a',
+      weight: 2,
+      fillOpacity: 0.85
+    }).addTo(state.map)
+      .bindTooltip(p.name, { permanent: false, direction: 'top' });
+
+    m.on('click', () => flyToPlace(p.lat, p.lon, p.name));
+    state.nearbyMarkers.push(m);
+  });
+}
+
+// Fly to a place on the map with smooth animation
+window.flyToPlace = function(lat, lon, name) {
+  // GUIDE: flyTo() smoothly animates the map pan + zoom
+  state.map.flyTo([lat, lon], 12, { duration: 1.5, easeLinearity: 0.25 });
+  showToast(`Moved to ${name}`);
+};
+
+// ─── 8. CITY MARKER ───────────────────────────────────────────────
+// Custom pulsing marker for the searched city
+
+function placeCityMarker(lat, lon, name) {
+  if (state.cityMarker) state.map.removeLayer(state.cityMarker);
+
+  // GUIDE: L.divIcon lets you use HTML/CSS as a map marker
+  const icon = L.divIcon({
+    className: '',
+    html: `
+      <div style="position:relative;width:20px;height:20px;">
+        <div style="position:absolute;inset:0;background:#38bdf8;border-radius:50%;
+                    animation:pulse-ring 1.8s infinite;opacity:0.6"></div>
+        <div style="position:absolute;inset:4px;background:#38bdf8;border-radius:50%;
+                    border:2px solid #0f172a;box-shadow:0 0 12px rgba(56,189,248,0.6)"></div>
+      </div>`,
+    iconSize: [20, 20],
+    iconAnchor: [10, 10],
+  });
+
+  state.cityMarker = L.marker([lat, lon], { icon })
+    .addTo(state.map)
+    .bindTooltip(name, { permanent: true, direction: 'right', offset: [12, 0] });
+}
+
+// ─── 9. SEARCH ────────────────────────────────────────────────────
+// Geocoding: converting a city name → lat/lon coordinates
+// We use Nominatim (free, no key). OpenWeatherMap geocoding also works.
+
+let searchDebounce = null;  // GUIDE: debounce prevents too many API calls while typing
+
+document.getElementById('city-input').addEventListener('input', function() {
+  clearTimeout(searchDebounce);
+  const q = this.value.trim();
+  if (q.length < 3) {
+    document.getElementById('suggestions').style.display = 'none';
+    return;
+  }
+  // GUIDE: setTimeout with 350ms delay = debounce pattern
+  searchDebounce = setTimeout(() => fetchSuggestions(q), 350);
+});
+
+document.getElementById('city-input').addEventListener('keydown', function(e) {
+  if (e.key === 'Enter') {
+    const q = this.value.trim();
+    if (q) searchCity(q);
+  }
+});
+
+async function fetchSuggestions(q) {
+  try {
+    const res = await fetch(
+      `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(q)}&format=json&limit=6&featuretype=city`,
+      { headers: { 'Accept-Language': 'en' } }
+    );
+    const results = await res.json();
+    showSuggestions(results.slice(0,5));
+  } catch(e) {}
+}
+
+function showSuggestions(results) {
+  const box = document.getElementById('suggestions');
+  if (!results.length) { box.style.display='none'; return; }
+  box.innerHTML = results.map(r => {
+    const name = r.display_name.split(',').slice(0,3).join(', ');
+    return `<div class="suggestion-item"
+              onclick="selectSuggestion('${r.display_name.split(',')[0].replace(/'/g,"\\'")}',${r.lat},${r.lon})">
+              <span class="suggestion-icon">📍</span>${name}
+            </div>`;
+  }).join('');
+  box.style.display = 'block';
+}
+
+window.selectSuggestion = function(name, lat, lon) {
+  document.getElementById('suggestions').style.display = 'none';
+  document.getElementById('city-input').value = '';
+  loadCity(name, parseFloat(lat), parseFloat(lon));
+};
+
+async function searchCity(q) {
+  document.getElementById('suggestions').style.display = 'none';
+  showToast('Searching…');
+  try {
+    const res = await fetch(
+      `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(q)}&format=json&limit=1`,
+      { headers: { 'Accept-Language': 'en' } }
+    );
+    const data = await res.json();
+    if (!data.length) { showToast('City not found', 'error'); return; }
+    const r = data[0];
+    loadCity(r.display_name.split(',')[0], parseFloat(r.lat), parseFloat(r.lon));
+    document.getElementById('city-input').value = '';
+  } catch(e) { showToast('Search failed', 'error'); }
+}
+
+// ─── 10. LOAD CITY (main orchestrator) ───────────────────────────
+// This ties everything together: update state → fetch data → update map → update UI
+
+async function loadCity(name, lat, lon) {
+  state.currentCity = { name, lat, lon };
+
+  // Fly map to new city
+  state.map.flyTo([lat, lon], 11, { duration: 2, easeLinearity: 0.2 });
+  placeCityMarker(lat, lon, name);
+
+  // Fetch weather + nearby in parallel
+  const [weather] = await Promise.all([
+    fetchWeather(lat, lon),
+    fetchNearbyPlaces(lat, lon, name),
+  ]);
+
+  state.weatherData = weather;
+  updateUI(weather);
+  updateClock();
+}
+
+// ─── 11. LAYER SWITCHING ─────────────────────────────────────────
+
+document.querySelectorAll('.pill').forEach(btn => {
+  btn.addEventListener('click', function() {
+    document.querySelectorAll('.pill').forEach(p => p.classList.remove('active'));
+    this.classList.add('active');
+    state.activeLayer = this.dataset.layer;
+    applyWeatherLayer(state.activeLayer);
+  });
+});
+
+// ─── 12. LIVE CLOCK ───────────────────────────────────────────────
+
+function updateClock() {
+  const el = document.getElementById('current-time');
+  const now = new Date();
+  el.textContent = `⏱ ${now.toUTCString().slice(17,25)} UTC  ·  LOCAL ${now.toLocaleTimeString()}`;
+}
+setInterval(updateClock, 1000);
+
+// ─── 13. UTILITY FUNCTIONS ───────────────────────────────────────
+
+function formatTime(unix) {
+  const d = new Date(unix * 1000);
+  return d.toLocaleTimeString([], { hour:'2-digit', minute:'2-digit' });
+}
+
+function degToCardinal(deg) {
+  const dirs = ['N','NNE','NE','ENE','E','ESE','SE','SSE','S','SSW','SW','WSW','W','WNW','NW','NNW'];
+  return dirs[Math.round(deg / 22.5) % 16];
+}
+
+// GUIDE: A big switch for weather condition IDs → emoji
+// Full list: https://openweathermap.org/weather-conditions
+function getWeatherEmoji(id) {
+  if (id >= 200 && id < 300) return '⛈️';
+  if (id >= 300 && id < 400) return '🌦️';
+  if (id >= 500 && id < 600) return '🌧️';
+  if (id >= 600 && id < 700) return '❄️';
+  if (id >= 700 && id < 800) return '🌫️';
+  if (id === 800) return '☀️';
+  if (id === 801) return '🌤️';
+  if (id === 802) return '⛅';
+  if (id >= 803) return '☁️';
+  return '🌡️';
+}
+
+// Toast notification system
+let toastTimer = null;
+function showToast(msg, type = 'info') {
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.className = type === 'error' ? 'error show' : type === 'success' ? 'success show' : 'show';
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => t.classList.remove('show'), 3000);
+}
+
+// Close suggestions when clicking outside
+document.addEventListener('click', (e) => {
+  if (!document.getElementById('search-wrap').contains(e.target)) {
+    document.getElementById('suggestions').style.display = 'none';
+  }
+});
+
+// ─── 14. BOOTSTRAP ───────────────────────────────────────────────
+// This runs when the page loads. Everything starts here.
+
+window.addEventListener('load', async () => {
+  initMap();
+  
+  try {
+    // Attempt to load Mumbai data
+    await loadCity('Mumbai', 19.076, 72.877);
+  } catch (e) {
+    console.log("Initial load failed, but continuing...");
+  }
+  // Hide loader with a short delay for polish
+  setTimeout(() => {
+    document.getElementById('loader').classList.add('hidden');
+  });
+  // Function to update the map layer based on selection
+function updateMapLayer(layerType) {
+    if (state.overlayLayer) {
+        state.map.removeLayer(state.overlayLayer);
+    }
+
+    // Mapping Windy-style layers to API endpoints
+    const layerUrls = {
+        'temp': 'temp_new',
+        'aqi': 'precipitation_new', // OWM uses precipitation tiles
+        'clouds': 'clouds_new',
+        'wind': 'wind_new'
+    };
+
+    const layerName = layerUrls[layerType];
+    const tileUrl = `https://tile.openweathermap.org/map/${layerName}/{z}/{x}/{y}.png?appid=${OWM_KEY}`;
+
+    state.overlayLayer = L.tileLayer(tileUrl, {
+        opacity: 0.6,
+        attribution: '© OpenWeatherMap'
+    }).addTo(state.map);
+}
+});
+
+// ─── END OF SCRIPT ───────────────────────────────────────────────
+// NEXT STEPS TO ENHANCE:
+// 1. Add OWM API key → live data replaces demo data
+// 2. Hourly chart: use Chart.js with OWM /forecast endpoint
+// 3. Click-on-map weather: map.on('click', e => loadCity(...e.latlng))
+// 4. Geolocation button: navigator.geolocation.getCurrentPosition()
+// 5. Unit toggle °C/°F: multiply by 9/5 + 32
+// 6. Dark/light theme: toggle a class on <body> and adjust CSS vars
+</script>
+</body>
+</html> 
